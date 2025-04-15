@@ -19,7 +19,7 @@ type Alert struct {
 	GeneratorURL string            `json:"generatorURL"`
 }
 
-type WebhookPayload struct {
+type AlertManagerPayload struct {
 	Receiver          string            `json:"receiver"`
 	Status            string            `json:"status"`
 	Alerts            []Alert           `json:"alerts"`
@@ -32,23 +32,12 @@ type WebhookPayload struct {
 }
 
 type SMSRequestFormat struct {
-	Webhook string `json:"webhook"`
 	Message string `json:"message"`
 	Target  string `json:"target"` // destination phone number
 }
+type ResponseFormat map[string]string
 
-func formatToCustomPayload(alert Alert) SMSRequestFormat {
-	alertLabels := alert.Labels
-	alertAnnotations := alert.Annotations
-
-	alertName := alertLabels["alertname"]
-	description := alertAnnotations["description"]
-	responseMsg := SMSRequestFormat{
-		Message: alertName + description,
-		Target:  "+989333333333",
-	}
-	return responseMsg
-}
+const SMSWebhook string = "https://sms.org"
 
 func fetchResponseSample(c *gin.Context) {
 	resp, err := http.Get("https://jsonplaceholder.typicode.com/posts/1")
@@ -66,16 +55,18 @@ func fetchResponseSample(c *gin.Context) {
 	}
 	c.IndentedJSON(http.StatusOK, data)
 }
-func sendRequestToSMSPanel(c *gin.Context) {
+func sendSMS(annotations map[string]string) ResponseFormat {
+	var responseData ResponseFormat
 
 	smsInstance := SMSRequestFormat{
-		Webhook: "https://postman-echo.com/post",
-		Message: "you have alert",
-		Target:  "mgh.esmaeili",
+		Message: annotations["description"],
+		Target:  annotations["target"],
 	}
+
 	postBody, _ := json.Marshal(smsInstance)
-	responseBody := bytes.NewBuffer(postBody)
-	resp, err := http.Post(smsInstance.Webhook, "application/json", responseBody)
+	requestBody := bytes.NewBuffer(postBody)
+
+	resp, err := http.Post(SMSWebhook, "application/json", requestBody)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -83,17 +74,35 @@ func sendRequestToSMSPanel(c *gin.Context) {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	var data map[string]interface{}
-	jsonErr := json.Unmarshal(body, &data)
+	jsonErr := json.Unmarshal(body, &responseData)
 	if jsonErr != nil {
 		log.Fatalln(err)
 	}
-	c.IndentedJSON(http.StatusOK, data)
+	return responseData
+}
+func sendRequestToTargetUser(c *gin.Context) {
+	var request AlertManagerPayload
+	var response ResponseFormat
+	c.BindJSON(&request)
+	annotations := request.Alerts[0].Annotations
+
+	switch sendingMethod := annotations["sending-method"]; sendingMethod {
+	case "sms":
+		response = sendSMS(annotations)
+		c.IndentedJSON(http.StatusOK, response)
+	case "call":
+		// call user will implement soon ...
+	default:
+		response = ResponseFormat{
+			"message": "sending method not defined",
+		}
+		c.IndentedJSON(http.StatusBadRequest, response)
+	}
 }
 
 func main() {
 	router := gin.Default()
 	router.GET("/fetch-action", fetchResponseSample)
-	router.POST("/request-action", sendRequestToSMSPanel)
+	router.POST("/request-action", sendRequestToTargetUser)
 	router.Run("localhost:8080")
 }
