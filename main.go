@@ -105,5 +105,5 @@ func main() {
 	router := gin.Default()
 	router.GET("/fetch-action", fetchResponseSample)
 	router.POST("/request-action", sendRequestToTargetUser)
-	router.Run("localhost:8080")
+	router.Run(":8080")
 }
