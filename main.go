@@ -88,8 +88,9 @@ func sendRequestToTargetUser(c *gin.Context) {
 
 	switch sendingMethod := annotations["sending-method"]; sendingMethod {
 	case "sms":
-		response = sendSMS(annotations)
-		c.IndentedJSON(http.StatusOK, response)
+		// response = sendSMS(annotations)
+		// c.IndentedJSON(http.StatusOK, response)
+		c.IndentedJSON(http.StatusOK, map[string]string{"response": "every this is okey"}) // test api!
 	case "call":
 		// call user will implement soon ...
 	default:
