@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -34,13 +35,10 @@ type AlertManagerPayload struct {
 	GroupKey          string            `json:"groupKey"`
 }
 
-type EnQueue map[string]interface{}
-type SMSRequestFormat struct {
-	requestBody map[string][]EnQueue
-}
 type ResponseFormat map[string]string
 
-const SMSWebhook string = "https://sms.org"
+const SMSWebhook string = "http://notifcation-webhook/notification"
+const Originator string = "originator-number"
 
 func setEnv() {
 
@@ -62,60 +60,79 @@ func setEnv() {
 
 }
 
-func fetchResponseSample(c *gin.Context) {
-	resp, err := http.Get("https://jsonplaceholder.typicode.com/posts/1")
-	if err != nil {
-		log.Fatalln(err)
+func checkResponseOfSmsPanel(responseData interface{}, phonenumber string) (map[string]string, int) {
+	resbody, ok := responseData.(map[string]string)
+	if !ok { // because the successful response has different format /:
+		return map[string]string{
+			"message": fmt.Sprintf("message sent to user %s successfully", phonenumber),
+		}, 200
 	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatalln(err)
+	val, nok := resbody["error"]
+	if nok {
+		return map[string]string{
+			"message": val,
+		}, 400
+	} else {
+		return map[string]string{
+			"message": fmt.Sprintf("message sent to user %s successfully", phonenumber),
+		}, 200
 	}
-	var data map[string]interface{}
-	jsonErr := json.Unmarshal(body, &data)
-	if jsonErr != nil {
-		log.Fatalln(err)
-	}
-	c.IndentedJSON(http.StatusOK, data)
+
 }
-func sendSMS(annotations map[string]string) map[string]string {
+func requestToSmsPanel(data map[string]interface{}) (*http.Response, error) {
+	postBody, _ := json.Marshal(data)
+	requestBody := bytes.NewBuffer(postBody)
+	resp, err := http.Post(SMSWebhook, "application/json", requestBody)
+	return resp, err
+}
+func failedResponse() (map[string]string, int) {
+	return map[string]string{
+		"message": "there was error when sending alert",
+	}, 500
+}
+
+func sendSMS(annotations map[string]string) (map[string]string, int) {
+	var phonenumber string = fmt.Sprintf(annotations["number"])
+	var description string = fmt.Sprintf(annotations["description"])
+	var responseData interface{}
+
 	data := map[string]interface{}{
 		"enqueue": []map[string]interface{}{
 			{
-				"Destination": "9333333333",
-				"Message":     "salam jigar",
-				"Originator":  os.Getenv("ORG_NUM"),
+				"destination": phonenumber,
+				"message":     description,
+				"originator":  Originator,
 			},
 		},
 	}
-	postBody, _ := json.Marshal(data)
-	requestBody := bytes.NewBuffer(postBody)
+	resp, err := requestToSmsPanel(data)
 
-	var responseData map[string]string
-	resp, err := http.Post(SMSWebhook, "application/json", requestBody)
 	if err != nil {
-		log.Fatalln(err)
+		return failedResponse()
+	} else {
+		body, err1 := io.ReadAll(resp.Body)
+		jsonErr := json.Unmarshal(body, &responseData)
+		if jsonErr == nil && err1 == nil {
+			return checkResponseOfSmsPanel(responseData, phonenumber)
+		} else {
+			return failedResponse()
+
+		}
 	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	jsonErr := json.Unmarshal(body, &responseData)
-	if jsonErr != nil {
-		log.Fatalln(err)
-	}
-	return responseData
 }
 func sendRequestToTargetUser(c *gin.Context) {
 	var request AlertManagerPayload
 	var response map[string]string
+	var statuscode int
 	c.BindJSON(&request)
 	annotations := request.Alerts[0].Annotations
 
 	switch sendingMethod := annotations["sending-method"]; sendingMethod {
 	case "sms":
-		response = sendSMS(annotations)
-		c.IndentedJSON(http.StatusOK, response) // test api!
+
+		response, statuscode = sendSMS(annotations)
+
+		c.IndentedJSON(statuscode, response) // test api!
 	case "call":
 		// call user will implement soon ...
 	default:
@@ -127,9 +144,7 @@ func sendRequestToTargetUser(c *gin.Context) {
 }
 
 func main() {
-	setEnv()
 	router := gin.Default()
-	router.GET("/fetch-action", fetchResponseSample)
 	router.POST("/request-action", sendRequestToTargetUser)
-	router.Run(":8080")
+	router.Run(":8086")
 }
