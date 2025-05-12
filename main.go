@@ -37,8 +37,8 @@ type AlertManagerPayload struct {
 
 type ResponseFormat map[string]string
 
-const SMSWebhook string = "http://notifcation-webhook/notification"
-const Originator string = "originator-number"
+const SMSWebhook string = "http://sms-panel/notification"
+const Originator string = "originator"
 
 func setEnv() {
 
@@ -91,19 +91,29 @@ func failedResponse() (map[string]string, int) {
 	}, 500
 }
 
+func convertListToArray(StringNumber string) []string {
+	return strings.Split(StringNumber, ",")
+}
+
 func sendSMS(annotations map[string]string) (map[string]string, int) {
 	var phonenumber string = fmt.Sprintf(annotations["number"])
 	var description string = fmt.Sprintf(annotations["description"])
 	var responseData interface{}
+	var enqueues []map[string]interface{}
 
-	data := map[string]interface{}{
-		"enqueue": []map[string]interface{}{
-			{
-				"destination": phonenumber,
+	numbers := convertListToArray(phonenumber)
+	for _, number := range numbers {
+		enqueues = append(enqueues,
+			map[string]interface{}{
+				"destination": number,
 				"message":     description,
 				"originator":  Originator,
 			},
-		},
+		)
+
+	}
+	data := map[string]interface{}{
+		"enqueue": enqueues,
 	}
 	resp, err := requestToSmsPanel(data)
 
